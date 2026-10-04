@@ -1,0 +1,146 @@
+/*
+ * Sy thepatterns Math + Code helpers for SiYuan
+ * SPDX-License-Identifier: MIT
+ *
+ * Paste this complete file into:
+ * Settings → Appearance → Custom JavaScript snippets
+ *
+ * No theme CSS is required. The script injects only the small amount of
+ * styling needed by its live preview and code-copy button.
+ */
+(function () {
+  'use strict';
+
+  if (window.syThepatternsMathCode) return;
+
+  const STYLE_ID = 'sythepatterns-math-code-style';
+  const LIVE_ID = 'sythepatterns-live-math';
+  const CODE_SELECTOR = '.code-block, [data-type="NodeCodeBlock"]';
+
+  function addMinimalStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      #${LIVE_ID} {
+        position: fixed; z-index: 99999; max-width: min(46rem, calc(100vw - 2rem));
+        max-height: 14rem; overflow: auto; padding: .65rem .85rem;
+        border: 1px solid currentColor; border-radius: .4rem;
+        background: Canvas; color: CanvasText; box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+        pointer-events: none;
+      }
+      #${LIVE_ID}[hidden] { display: none; }
+      .sythepatterns-code-copy {
+        float: right; margin: .25rem .35rem 0 0; padding: .15rem .4rem;
+        border: 1px solid currentColor; border-radius: .3rem;
+        background: transparent; color: inherit; cursor: pointer; font: inherit;
+      }
+      .sythepatterns-code-copy:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+      @media (prefers-reduced-motion: reduce) { #${LIVE_ID} { scroll-behavior: auto; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function all(root, selector) {
+    return (root || document).querySelectorAll(selector);
+  }
+
+  function codeText(block) {
+    return block.querySelector('pre code, pre, code')?.innerText || '';
+  }
+
+  function decorateCode(root) {
+    all(root, CODE_SELECTOR).forEach((block) => {
+      if (block.querySelector('.sythepatterns-code-copy')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sythepatterns-code-copy';
+      button.textContent = 'Copy';
+      button.setAttribute('aria-label', 'Copy code block');
+      button.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(codeText(block));
+          button.textContent = 'Copied';
+        } catch (_) {
+          button.textContent = 'Select code';
+        }
+        window.setTimeout(() => { button.textContent = 'Copy'; }, 1200);
+      });
+      block.prepend(button);
+    });
+  }
+
+  function liveBox() {
+    let box = document.getElementById(LIVE_ID);
+    if (!box) {
+      box = document.createElement('div');
+      box.id = LIVE_ID;
+      box.hidden = true;
+      box.setAttribute('role', 'status');
+      box.setAttribute('aria-live', 'polite');
+      document.body.appendChild(box);
+    }
+    return box;
+  }
+
+  function unfinishedFormula(text) {
+    // Prefer a display formula if the current block contains one.
+    const display = text.match(/\$\$([\s\S]*?)(?:\$\$)?$/);
+    if (display && display[1].trim()) return { source: display[1], display: true };
+
+    // Otherwise preview the last inline formula, including an unclosed `$`.
+    const inline = text.match(/(^|[^$])\$([^$\n]*)$/);
+    if (inline && inline[2].trim()) return { source: inline[2], display: false };
+    return null;
+  }
+
+  function showLiveMath(text, rect) {
+    const box = liveBox();
+    const formula = unfinishedFormula(text);
+    const katex = window.katex;
+    if (!formula || !katex || typeof katex.renderToString !== 'function') {
+      box.hidden = true;
+      return;
+    }
+    try {
+      box.innerHTML = katex.renderToString(formula.source, {
+        displayMode: formula.display,
+        throwOnError: false,
+        strict: 'ignore',
+        trust: false,
+        macros: window.siyuan?.config?.editor?.katexMacros || {}
+      });
+      box.hidden = false;
+      const left = Math.max(8, Math.min(innerWidth - box.offsetWidth - 8, rect.left));
+      const top = Math.min(innerHeight - box.offsetHeight - 8, rect.bottom + 8);
+      box.style.left = `${left}px`;
+      box.style.top = `${Math.max(8, top)}px`;
+    } catch (_) {
+      box.hidden = true;
+    }
+  }
+
+  function onInput(event) {
+    const editor = event.target.closest?.('[contenteditable="true"], .protyle-wysiwyg');
+    if (!editor) return;
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode?.parentElement || editor;
+    showLiveMath(editor.innerText || editor.textContent || '', anchor.getBoundingClientRect());
+    decorateCode(editor);
+  }
+
+  function refresh(root) { decorateCode(root); }
+
+  addMinimalStyles();
+  refresh(document);
+  document.addEventListener('input', onInput, true);
+  document.addEventListener('click', () => {
+    const box = document.getElementById(LIVE_ID);
+    if (box) box.hidden = true;
+  }, true);
+  new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach((node) => {
+    if (node.nodeType === Node.ELEMENT_NODE) refresh(node);
+  }))).observe(document.body, { childList: true, subtree: true });
+
+  window.syThepatternsMathCode = { refresh: () => refresh(document) };
+})();
